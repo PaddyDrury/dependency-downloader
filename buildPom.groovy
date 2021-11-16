@@ -1,4 +1,4 @@
-//#!/usr/bin/env groovy
+#!/usr/bin/env groovy
 import groovy.transform.EqualsAndHashCode
 import groovy.transform.ToString
 import groovy.xml.XmlParser
@@ -29,10 +29,22 @@ class PomBuilder {
     static def IGNORABLE_GROUPS = ["org.elasticsearch.distribution.integ-test-zip"]
 
     static def KNOWN_DODGY_DEPENDENCIES = [
-      'kotlin-': 'org.jetbrains.kotlin',
-      'zipkin-': 'io.zipkin.reporter2',
-      'brave': 'io.zipkin.brave'
+            'kotlin-': 'org.jetbrains.kotlin',
+            'zipkin-': 'io.zipkin.reporter2',
+            'brave'  : 'io.zipkin.brave'
     ]
+
+    static List<Closure<Dependency>> DEPENDENCY_BLACKLIST = [
+            blacklistArtifacts(
+                    'kotlin-annotation-processing',
+                    'kotlin-stdlib-wasm'
+            ),
+            { it.artifact.startsWith('kotlinx-coroutines-core-') && it.artifact != 'kotlinx-coroutines-core-js' }
+    ]
+
+    static Closure<Dependency> blacklistArtifacts(String... names) {
+        { Dependency dep -> names.any { it == dep.artifact } }
+    }
 
     static def allRepos = [
             [id: 'central', url: 'https://repo1.maven.org/maven2/'],
@@ -194,7 +206,7 @@ class PomBuilder {
     }
 
     // add all the dependencies we need to the POM object model and then dump the POM to file
-    def generatePom(artifacts, groups) {
+    def generatePom(artifacts, groups, outputDirectory) {
 
         def dependencies = artifacts.collect { it ->
             def gav = it.tokenize(':')
@@ -212,7 +224,7 @@ class PomBuilder {
         }
 
         println "Successfully added ${addedDependencies.size()} dependencies to POM"
-        dumpPom()
+        dumpPom(outputDirectory)
     }
 
     // resolve every artifact for the group and version specified
@@ -241,7 +253,7 @@ class PomBuilder {
 
     // add a dependency to the POM
     def addDependency(dependency, isPomType) {
-        if (addedDependencies.add(dependency)) {
+        if (addedDependencies.add(dependency) && !DEPENDENCY_BLACKLIST.any { it(dependency) }) {
             println dependency
             def dep = outputPom.dependencies.first().appendNode('dependency')
             dep.appendNode('groupId', dependency.group)
@@ -284,8 +296,9 @@ class PomBuilder {
     }
 
     // dump POM to file
-    def dumpPom() {
-        def pom = "${outputName}.pom.xml"
+    def dumpPom(outputDirectory) {
+        (outputDirectory as File).mkdirs()
+        def pom = "${outputDirectory}/${outputName}.pom.xml"
         (pom as File).text = XmlUtil.serialize(outputPom)
         pom
     }
@@ -363,21 +376,21 @@ class PomBuilder {
             if (removeScope) {
                 node.remove(node.scope.first())
             }
-            if(dependency.group == '${project.groupId}') {
-              println "Found dodgy dependency $dependency"
-              KNOWN_DODGY_DEPENDENCIES.each { artifactPrefix, actualGroup ->
-                if(dependency.artifact.startsWith(artifactPrefix)) {
-                  replaceGroup(node, actualGroup)
+            if (dependency.group == '${project.groupId}') {
+                println "Found dodgy dependency $dependency"
+                KNOWN_DODGY_DEPENDENCIES.each { artifactPrefix, actualGroup ->
+                    if (dependency.artifact.startsWith(artifactPrefix)) {
+                        replaceGroup(node, actualGroup)
+                    }
                 }
-              }
             }
             outputPom.dependencies.first().append(node)
         }
     }
 
     def replaceGroup(node, newGroup) {
-      node.remove(node.groupId.first())
-              node.appendNode('groupId', newGroup)
+        node.remove(node.groupId.first())
+        node.appendNode('groupId', newGroup)
     }
 
     // resolve actual value
@@ -387,10 +400,9 @@ class PomBuilder {
             def textValue = matcher.group('textValue')
             if (textValue == 'project.version') {
                 projectVersion
-            } else if(textValue == 'project.groupId') {
+            } else if (textValue == 'project.groupId') {
                 projectGroup
-            }
-            else {
+            } else {
                 resolveTextValue(props[textValue], props, projectVersion, projectGroup)
             }
         } else {
@@ -443,13 +455,19 @@ if (invalidRepoIds) {
     System.exit(1)
 }
 
-
+def outputDirectory = "downloads/${outputName}"
 def builder = new PomBuilder(outputName, enabledRepoIds ?: (allRepoIds - disabledRepoIds))
-def pomFileName = builder.generatePom(artifacts, groups)
+def pomPath = builder.generatePom(artifacts, groups, outputDirectory)
 
 
-def executeProcess(def procToExecute) {
-    def proc = procToExecute.execute()
+def executeProcess(def procToExecute, def dir = null) {
+    def proc = dir ?
+            procToExecute.execute(System.getenv()
+                    .collect {
+                        "${it.key}=$it.value"
+                    },
+                    dir as File
+            ) : procToExecute.execute()
     proc.consumeProcessOutput(System.out, System.err)
     proc.waitFor()
     if (proc.exitValue()) {
@@ -458,13 +476,22 @@ def executeProcess(def procToExecute) {
     !proc.exitValue()
 }
 
+
 // run mvn package on generated POM, and then tar it up
-if (executeProcess(['mvn.cmd', '-B', 'package', '-f', pomFileName]) &&
-        executeProcess(['tar', '-czvf', "${outputName}.tar.gz", '--exclude=**/maven-metadata-local.xml', options.o])) {
+if (executeProcess(['mvn.cmd', '-B', 'package', '-f', (pomPath as File).getName()], outputDirectory) &&
+        executeProcess(['tar', '-czvf', "${outputName}.tar.gz", '--exclude=**/maven-metadata-local.xml', outputName], outputDirectory)) {
     println "Successfully built dependency tarball ${outputName}.tar.gz"
     if (deleteTempFiles) {
-        (outputName as File).deleteDir()
-        (pomFileName as File).delete()
+        ("$outputDirectory/$outputName" as File).deleteDir()
+        (pomPath as File).delete()
     }
+} else {
+    println """
+Failed to generate dependency tarball. Fix errors in $pomPath and then run
+cd $outputDirectory &&
+mvn -B package -f ${(pomPath as File).getName()} &&
+tar -czvf ${outputName}.tar.gz --exclude=**/maven-metadata-local.xml $outputName &&
+rm -rf $outputName ${(pomPath as File).getName()}
+"""
 }
 
