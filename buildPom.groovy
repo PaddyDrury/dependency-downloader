@@ -39,7 +39,35 @@ class PomBuilder {
                     'kotlin-annotation-processing',
                     'kotlin-stdlib-wasm'
             ),
-            { it.artifact.startsWith('kotlinx-coroutines-core-') && it.artifact != 'kotlinx-coroutines-core-js' }
+            { it.artifact.startsWith('kotlinx-coroutines-core-') && it.artifact != 'kotlinx-coroutines-core-js' },
+            blacklistArtifacts(
+                    'camel-core-engine-starter',
+                    'camel-as2-parent',
+                    'camel-avro-rpc-component',
+                    'camel-avro-rpc-parent',
+                    'camel-avro-spi',
+                    'camel-aws-parent',
+                    'camel-azure-parent',
+                    'camel-box-parent',
+                    'camel-debezium-common-parent',
+                    'camel-debezium-maven-plugin',
+                    'camel-debezium-parent',
+                    'camel-fhir-parent',
+                    'camel-google-parent',
+                    'camel-huawei-parent',
+                    'camel-infinispan-parent',
+                    'camel-microprofile-parent',
+                    'camel-olingo2-parent',
+                    'camel-olingo4-parent',
+                    'camel-salesforce-maven-plugin',
+                    'camel-salesforce-parent',
+                    'camel-servicenow-maven-plugin',
+                    'camel-servicenow-parent',
+                    'camel-test-parent',
+                    'camel-vertx-parent',
+                    'cxf-rt-ws-security-oauth2'
+            )
+
     ]
 
     static Closure<Dependency> blacklistArtifacts(String... names) {
@@ -55,9 +83,9 @@ class PomBuilder {
             [id: 'gemstone-release-cache', url: 'https://repo.spring.io/gemstone-release-cache/'],
             [id: 'gemstone-release-pivotal-cache', url: 'https://repo.spring.io/gemstone-release-pivotal-cache/'],
             [id: 'mulesoft', url: 'https://repository.mulesoft.org/nexus/content/repositories/public/'],
-            [id: 'icm', url: 'http://maven.icm.edu.pl/artifactory/repo/'],
+            //[id: 'icm', url: 'http://maven.icm.edu.pl/artifactory/repo/'],
             [id: 'google', url: 'https://maven.google.com/'],
-            [id: 'kotlin-plugin', url: 'https://dl.bintray.com/kotlin/kotlin-plugin/']
+           // [id: 'kotlin-plugin', url: 'https://dl.bintray.com/kotlin/kotlin-plugin/']
     ]
 
     def outputPom
@@ -70,6 +98,7 @@ class PomBuilder {
     PomBuilder(outputName, enabledRepoIds) {
         this.outputName = outputName
         this.repos = enabledRepoIds.collect { id -> allRepos.find { it.id == id } } ?: allRepos
+        addedRepos.addAll(repos.collect { normalise(it.url) })
         this.outputPom = pomFromTemplate(outputName, repos)
     }
 
@@ -253,8 +282,11 @@ class PomBuilder {
 
     // add a dependency to the POM
     def addDependency(dependency, isPomType) {
+
+        print("Maybe adding $dependency.artifact")
+
         if (addedDependencies.add(dependency) && !DEPENDENCY_BLACKLIST.any { it(dependency) }) {
-            println dependency
+            println "Adding $dependency"
             def dep = outputPom.dependencies.first().appendNode('dependency')
             dep.appendNode('groupId', dependency.group)
             dep.appendNode('artifactId', dependency.artifact)
@@ -273,6 +305,14 @@ class PomBuilder {
             pomCache[dependency] = pom
         }
         pom
+    }
+
+    def normalise(url) {
+        if(url.endsWith('/')) {
+            url
+        } else {
+            url + '/'
+        }
     }
 
     // download a pom
@@ -313,7 +353,7 @@ class PomBuilder {
             def projectGroup = dependency.group
 
             pom.repositories.repository.each {
-                if (addedRepos.add(it.url.text())) {
+                if (addedRepos.add(normalise(it.url.text()))) {
                     outputPom.repositories.first().append(it)
                 }
             }
@@ -371,7 +411,7 @@ class PomBuilder {
 
     // copy a dependency XML node to the output pom if it isn't there already, and fix the version
     def copyDependencyNode(node, dependency, removeScope) {
-        if (addedDependencies.add(dependency)) {
+        if (!DEPENDENCY_BLACKLIST.any { it(dependency) } && addedDependencies.add(dependency)) {
             node.version.first().setValue(dependency.version)
             if (removeScope) {
                 node.remove(node.scope.first())
