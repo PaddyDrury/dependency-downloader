@@ -29,9 +29,10 @@ class PomBuilder {
     static def IGNORABLE_GROUPS = ["org.elasticsearch.distribution.integ-test-zip"]
 
     static def KNOWN_DODGY_DEPENDENCIES = [
-            'kotlin-': 'org.jetbrains.kotlin',
-            'zipkin-': 'io.zipkin.reporter2',
-            'brave'  : 'io.zipkin.brave'
+            'kotlin-'  : 'org.jetbrains.kotlin',
+            'zipkin-'  : 'io.zipkin.reporter2',
+            'brave'    : 'io.zipkin.brave',
+            'querydsl-': 'com.querydsl'
     ]
 
     static List<Closure<Dependency>> DEPENDENCY_BLACKLIST = [
@@ -66,6 +67,9 @@ class PomBuilder {
                     'camel-test-parent',
                     'camel-vertx-parent',
                     'cxf-rt-ws-security-oauth2'
+            ),
+            blacklistArtifacts(
+                    'querydsl-codegen-utils'
             )
 
     ]
@@ -83,9 +87,10 @@ class PomBuilder {
             [id: 'gemstone-release-cache', url: 'https://repo.spring.io/gemstone-release-cache/'],
             [id: 'gemstone-release-pivotal-cache', url: 'https://repo.spring.io/gemstone-release-pivotal-cache/'],
             [id: 'mulesoft', url: 'https://repository.mulesoft.org/nexus/content/repositories/public/'],
+            [id: 'spring-releases', url: 'https://repo.spring.io/release/'],
             //[id: 'icm', url: 'http://maven.icm.edu.pl/artifactory/repo/'],
             [id: 'google', url: 'https://maven.google.com/'],
-           // [id: 'kotlin-plugin', url: 'https://dl.bintray.com/kotlin/kotlin-plugin/']
+            // [id: 'kotlin-plugin', url: 'https://dl.bintray.com/kotlin/kotlin-plugin/']
     ]
 
     def outputPom
@@ -308,7 +313,7 @@ class PomBuilder {
     }
 
     def normalise(url) {
-        if(url.endsWith('/')) {
+        if (url.endsWith('/')) {
             url
         } else {
             url + '/'
@@ -416,7 +421,7 @@ class PomBuilder {
             if (removeScope) {
                 node.remove(node.scope.first())
             }
-            if (dependency.group == '${project.groupId}') {
+            if (dependency.group == '${project.groupId}' || dependency.group == 'group') {
                 println "Found dodgy dependency $dependency"
                 KNOWN_DODGY_DEPENDENCIES.each { artifactPrefix, actualGroup ->
                     if (dependency.artifact.startsWith(artifactPrefix)) {
