@@ -24,9 +24,14 @@ class PomBuilder {
                                "gradle-plugins",
                                "micrometer-registry-stackdriver",
                                "kotlinx-coroutines-core-native",
-                               "kotlinx-coroutines-play-services"]
+                               "kotlinx-coroutines-play-services",
+                               "infinispan-tools"
+    ]
 
-    static def IGNORABLE_GROUPS = ["org.elasticsearch.distribution.integ-test-zip"]
+    static def IGNORABLE_GROUPS = [
+            "org.elasticsearch.distribution.integ-test-zip",
+            'io.rest-assured.examples',
+    ]
 
     static def KNOWN_DODGY_DEPENDENCIES = [
             'kotlin-'  : 'org.jetbrains.kotlin',
